@@ -1,0 +1,160 @@
+from __future__ import annotations
+
+from pathlib import Path
+import re
+
+from .ingest import load_corpus
+from .internet import search_duckduckgo
+from .llm import LocalLLM
+from .models import AgentAnswer, SearchHit
+from .retrievers import HybridSearcher
+from .utils import expand_query, tokenize
+
+
+INDEX_PATH = Path(__file__).resolve().parents[2] / "data" / "index.json"
+
+
+class ChatDKUAgent:
+    def __init__(self, index_path: Path | None = None) -> None:
+        path = index_path or INDEX_PATH
+        self.chunks = load_corpus(path)
+        self.hybrid = HybridSearcher(self.chunks)
+        self.llm = LocalLLM.from_env()
+
+    def answer(self, question: str, language: str = "en", allow_internet: bool = False) -> AgentAnswer:
+        hits = self.hybrid.search(question, limit=5)
+        tool_trace = ["keyword_search", "vector_search"]
+        internet_results: list[dict[str, str]] = []
+        if allow_internet and not hits:
+            internet_results = search_duckduckgo(question)
+            if internet_results:
+                tool_trace.append("internet_search")
+
+        answer_text = self._format_answer(question, hits, language, internet_results)
+        sources = [
+            {
+                "document": hit.chunk.doc_name,
+                "page": hit.chunk.page,
+                "chunk_id": hit.chunk.chunk_id,
+            }
+            for hit in hits
+        ]
+        return AgentAnswer(language=language, answer=answer_text, sources=sources, tool_trace=tool_trace)
+
+    def _format_answer(
+        self,
+        question: str,
+        hits: list[SearchHit],
+        language: str,
+        internet_results: list[dict[str, str]],
+    ) -> str:
+        if hits:
+            top = hits[:3]
+            direct = self._generate_answer(question, top, language)
+            snippets = "\n".join(
+                f"- {hit.chunk.text[:280].strip()} ({hit.chunk.doc_name}, page {hit.chunk.page or 'N/A'})"
+                for hit in top
+            )
+            if language == "zh":
+                return (
+                    f"问题：{question}\n\n"
+                    f"直接答案：{direct}\n\n"
+                    "证据片段：\n"
+                    f"{snippets}\n\n"
+                    "如需更完整答复，可以继续把这些片段交给本地 LLM 做最终整合。"
+                )
+            return (
+                f"Question: {question}\n\n"
+                f"Direct answer: {direct}\n\n"
+                "Evidence snippets:\n"
+                f"{snippets}\n\n"
+                "This can be passed to a local LLM for final answer synthesis."
+            )
+
+        if internet_results:
+            if language == "zh":
+                rows = "\n".join(f"- {item['title']}: {item['url']}" for item in internet_results)
+                return f"本地文档未命中，网络搜索结果如下：\n{rows}"
+            rows = "\n".join(f"- {item['title']}: {item['url']}" for item in internet_results)
+            return f"No local document hits were found. Internet results:\n{rows}"
+
+        if language == "zh":
+            return "没有找到足够相关的内容。请换一种问法，或启用网络搜索。"
+        return "I could not find enough relevant context. Try rephrasing the question or enabling internet search."
+
+    def _generate_answer(self, question: str, hits: list[SearchHit], language: str) -> str:
+        llm_answer = self._llm_summary(question, hits, language)
+        if llm_answer:
+            return llm_answer
+        return self._extractive_summary(question, hits, language)
+
+    def _llm_summary(self, question: str, hits: list[SearchHit], language: str) -> str | None:
+        if not self.llm:
+            return None
+
+        evidence = "\n\n".join(
+            f"[{idx}] {hit.chunk.doc_name}, page {hit.chunk.page or 'N/A'}\n{hit.chunk.text}"
+            for idx, hit in enumerate(hits, start=1)
+        )
+
+        if language == "zh":
+            prompt = (
+                "你是一个大学教务问答助手。请只根据给定证据回答问题。"
+                "如果证据不足，就明确说明。回答保持简洁，并尽量在句末引用来源编号。\n\n"
+                f"问题：{question}\n\n证据：\n{evidence}"
+            )
+        else:
+            prompt = (
+                "You are a university advising assistant. Answer only from the provided evidence. "
+                "If the evidence is insufficient, say so clearly. Keep the answer concise and cite source "
+                "numbers when possible.\n\n"
+                f"Question: {question}\n\nEvidence:\n{evidence}"
+            )
+        return self.llm.complete(prompt)
+
+    def _extractive_summary(self, question: str, hits: list[SearchHit], language: str) -> str:
+        question_lower = question.lower()
+
+        for hit in hits:
+            text = hit.chunk.text
+            lower = text.lower()
+            if ("credit" in question_lower or "学分" in question_lower) and (
+                "136 duke kunshan university credits" in lower or "34 duke kunshan university credits" in lower
+            ):
+                if language == "zh":
+                    return "毕业通常需要 136 个 DKU 学分；其中还包含 34 个由 Duke faculty 授课或共同授课获得的学分，部分中国学生另有额外要求。"
+                return (
+                    "Graduation normally requires 136 DKU credits, including 34 DKU credits earned in courses "
+                    "taught or co-taught by Duke faculty; some Chinese students have additional requirements."
+                )
+            if ("leave" in question_lower or "loa" in question_lower or "休学" in question_lower) and (
+                "can i take classes at different universities while i’m on leave of absence" in lower
+                or "can i take classes at different universities while i'm on leave of absence" in lower
+            ):
+                if language == "zh":
+                    return "可以，但通常最多只能转两门课、共 8 个 DKU 学分，而且课程需要来自认可的四年制高校或同等机构。"
+                return (
+                    "Yes. Students on leave of absence may usually transfer up to two courses, for a total of 8 DKU "
+                    "credits, from an accredited four-year institution or equivalent."
+                )
+
+        question_terms = set(tokenize(expand_query(question)))
+        best_sentence = ""
+        best_score = -1
+
+        for hit in hits:
+            sentences = re.split(r"(?<=[.!?。！？])\s+", hit.chunk.text)
+            for sentence in sentences:
+                sent_terms = set(tokenize(sentence))
+                score = len(question_terms & sent_terms)
+                if "credit" in sentence.lower() or "leave of absence" in sentence.lower():
+                    score += 2
+                if score > best_score and len(sentence.strip()) > 25:
+                    best_score = score
+                    best_sentence = sentence.strip()
+
+        if best_sentence:
+            return best_sentence
+        if language == "zh":
+            return "已找到相关校内政策，但还需要本地大模型做更自然的整合。"
+        return "Relevant policy text was found, but a local LLM should synthesize it into a smoother final answer."

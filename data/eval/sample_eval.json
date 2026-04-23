@@ -1,0 +1,18 @@
+[
+  {
+    "question": "How many credits do I need to graduate?",
+    "expected_document": "Advising FAQ (12-19-24 Update).docx"
+  },
+  {
+    "question": "What is the Quantitative Reasoning requirement?",
+    "expected_document": "ug_bulletin_2025-2026.pdf"
+  },
+  {
+    "question": "Can I take classes while on leave of absence?",
+    "expected_document": "Advising FAQ (12-19-24 Update).docx"
+  },
+  {
+    "question": "What are the distribution requirements?",
+    "expected_document": "ug_bulletin_2025-2026.pdf"
+  }
+]
