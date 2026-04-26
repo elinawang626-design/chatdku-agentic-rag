@@ -161,7 +161,7 @@ The latest regenerated retrieval, embedding, and local-LLM results are stored in
 
 ### Embedding comparison
 
-- `hybrid-hash`: 100.00% retrieval hit rate
+- `hybrid-hash`: 83.33% retrieval hit rate
 - `hybrid-bge-small-en-v1.5`: 100.00% retrieval hit rate
 - `hybrid-all-MiniLM-L6-v2`: 100.00% retrieval hit rate
 
