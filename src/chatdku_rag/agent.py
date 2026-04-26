@@ -49,9 +49,20 @@ class ChatDKUAgent:
                 "document": hit.chunk.doc_name,
                 "page": hit.chunk.page,
                 "chunk_id": hit.chunk.chunk_id,
+                "source_type": "local_document",
             }
             for hit in hits
         ]
+        for index, item in enumerate(internet_results, start=1):
+            sources.append(
+                {
+                    "document": item["title"],
+                    "page": "web",
+                    "chunk_id": f"web:{index}",
+                    "url": item["url"],
+                    "source_type": "internet_result",
+                }
+            )
         return AgentAnswer(language=language, answer=answer_text, sources=sources, tool_trace=tool_trace)
 
     def _build_embedder(self, embedding_model_name: str):
@@ -88,6 +99,20 @@ class ChatDKUAgent:
                 f"- [{idx}] {hit.chunk.text[:280].strip()} ({hit.chunk.doc_name}, page {hit.chunk.page or 'N/A'})"
                 for idx, hit in enumerate(top, start=1)
             )
+            internet_note = ""
+            if internet_results:
+                if language == "zh":
+                    web_lines = "\n".join(
+                        f"- [W{idx}] {item['title']} (web result, {item['url']})"
+                        for idx, item in enumerate(internet_results, start=1)
+                    )
+                    internet_note = f"\n\n补充网络结果：\n{web_lines}"
+                else:
+                    web_lines = "\n".join(
+                        f"- [W{idx}] {item['title']} (web result, {item['url']})"
+                        for idx, item in enumerate(internet_results, start=1)
+                    )
+                    internet_note = f"\n\nSupplemental internet results:\n{web_lines}"
             if language == "zh":
                 closing = (
                     "以上答案由本地 DSPy + vLLM 路径生成。"
@@ -98,7 +123,8 @@ class ChatDKUAgent:
                     f"问题：{question}\n\n"
                     f"直接答案：{direct}\n\n"
                     "证据片段：\n"
-                    f"{snippets}\n\n"
+                    f"{snippets}"
+                    f"{internet_note}\n\n"
                     f"{closing}"
                 )
             closing = (
@@ -110,16 +136,30 @@ class ChatDKUAgent:
                 f"Question: {question}\n\n"
                 f"Direct answer: {direct}\n\n"
                 "Evidence snippets:\n"
-                f"{snippets}\n\n"
+                f"{snippets}"
+                f"{internet_note}\n\n"
                 f"{closing}"
             )
 
         if internet_results:
             if language == "zh":
-                rows = "\n".join(f"- {item['title']}: {item['url']}" for item in internet_results)
-                return f"本地文档未命中，网络搜索结果如下：\n{rows}"
-            rows = "\n".join(f"- {item['title']}: {item['url']}" for item in internet_results)
-            return f"No local document hits were found. Internet results:\n{rows}"
+                rows = "\n".join(
+                    f"- [W{idx}] {item['title']} (web result, {item['url']})"
+                    for idx, item in enumerate(internet_results, start=1)
+                )
+                return (
+                    "本地文档未命中，因此无法提供校内文档页码引用。以下是补充网络结果：\n"
+                    f"{rows}"
+                )
+            rows = "\n".join(
+                f"- [W{idx}] {item['title']} (web result, {item['url']})"
+                for idx, item in enumerate(internet_results, start=1)
+            )
+            return (
+                "No local document hits were found, so no document page citations are available. "
+                "Supplemental internet results:\n"
+                f"{rows}"
+            )
 
         if language == "zh":
             return "没有找到足够相关的内容。请换一种问法，或启用网络搜索。"

@@ -157,7 +157,7 @@ python scripts/run_eval.py \
   --input "/path/to/ug_bulletin_2025-2026.pdf"
 ```
 
-The latest regenerated retrieval/embedding results are stored in [results/empirical_eval.md](results/empirical_eval.md).
+The latest regenerated retrieval, embedding, and local-LLM results are stored in [results/empirical_eval.md](results/empirical_eval.md).
 
 ### Embedding comparison
 
@@ -167,10 +167,8 @@ The latest regenerated retrieval/embedding results are stored in [results/empiri
 
 ### Local LLM comparison via vLLM
 
-Previously observed local-vLLM results are stored in [results/local_llm_eval_observed.md](results/local_llm_eval_observed.md):
-
 - `Qwen/Qwen2.5-0.5B-Instruct` with DSPy + `bge-small-en-v1.5`: 100.00% retrieval hit rate, 66.67% answer keyword hit rate
-- `Qwen/Qwen2.5-1.5B-Instruct` with DSPy + `bge-small-en-v1.5`: 100.00% retrieval hit rate, 66.67% answer keyword hit rate
+- `Qwen/Qwen2.5-1.5B-Instruct` with DSPy + `bge-small-en-v1.5`: 100.00% retrieval hit rate, 83.33% answer keyword hit rate
 
 The 1.5B model was materially slower on CPU in this local Apple silicon environment.
 
@@ -182,6 +180,8 @@ python scripts/run_eval.py \
   --input "/path/to/ug_bulletin_2025-2026.pdf" \
   --llm-configs data/eval/llm_eval_configs.example.json
 ```
+
+The earlier archived run notes are preserved in [results/local_llm_eval_observed.md](results/local_llm_eval_observed.md).
 
 ## Verification
 
