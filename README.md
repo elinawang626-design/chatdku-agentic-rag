@@ -4,7 +4,7 @@ This repository implements a bilingual mini agentic RAG system for the ChatDKU A
 
 ## Implemented requirements
 
-The current repository now includes all core building blocks requested in the PDF:
+The current repository now includes the core building blocks for the candidate-task RAG system:
 
 - document ingestion from PDF and DOCX
 - chunking with source metadata and page numbers
@@ -14,7 +14,7 @@ The current repository now includes all core building blocks requested in the PD
 - bilingual query interface (`en` and `zh`)
 - source-grounded answers with document name and page number
 - local LLM serving via `vLLM`
-- DSPy-based routing and answer generation
+- LangChain-based routing and answer generation
 - empirical evaluation across multiple embedding models and multiple locally served LLMs
 
 ## Repository layout
@@ -40,7 +40,6 @@ chatdku-agentic-rag/
         ├── __init__.py
         ├── agent.py
         ├── cli.py
-        ├── dspy_program.py
         ├── ingest.py
         ├── internet.py
         ├── llm.py
@@ -98,12 +97,12 @@ Another tested comparison model:
 ```bash
 vllm serve Qwen/Qwen2.5-1.5B-Instruct \
   --host 127.0.0.1 \
-  --port 8000 \
+  --port 8001 \
   --api-key local \
   --generation-config vllm
 ```
 
-## Configure DSPy + local LLM access
+## Configure LangChain + local LLM access
 
 ```bash
 export CHATDKU_LLM_BASE_URL="http://127.0.0.1:8000/v1"
@@ -131,9 +130,9 @@ python -m chatdku_rag.cli ask \
   "休学期间可以在别的学校上课吗？"
 ```
 
-## DSPy layer
+## LangChain layer
 
-The DSPy implementation lives in [src/chatdku_rag/dspy_program.py](src/chatdku_rag/dspy_program.py) and is used for:
+The LangChain implementation is centered in [src/chatdku_rag/agent.py](src/chatdku_rag/agent.py) and [src/chatdku_rag/llm.py](src/chatdku_rag/llm.py). It is used for:
 
 - routing between local-only and internet-supplemented answering
 - grounded answer generation from retrieved evidence
@@ -167,8 +166,8 @@ The latest regenerated retrieval, embedding, and local-LLM results are stored in
 
 ### Local LLM comparison via vLLM
 
-- `Qwen/Qwen2.5-0.5B-Instruct` with DSPy + `bge-small-en-v1.5`: 100.00% retrieval hit rate, 66.67% answer keyword hit rate
-- `Qwen/Qwen2.5-1.5B-Instruct` with DSPy + `bge-small-en-v1.5`: 100.00% retrieval hit rate, 83.33% answer keyword hit rate
+- `Qwen/Qwen2.5-0.5B-Instruct` with LangChain + `bge-small-en-v1.5`: 100.00% retrieval hit rate, 66.67% answer keyword hit rate
+- `Qwen/Qwen2.5-1.5B-Instruct` with LangChain + `bge-small-en-v1.5`: 100.00% retrieval hit rate, 83.33% answer keyword hit rate
 
 The 1.5B model was materially slower on CPU in this local Apple silicon environment.
 
