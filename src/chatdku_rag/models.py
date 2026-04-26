@@ -28,3 +28,19 @@ class AgentAnswer:
     answer: str
     sources: list[dict[str, Any]]
     tool_trace: list[str]
+
+
+@dataclass
+class EvalExample:
+    question: str
+    language: str
+    expected_document: str
+    expected_answer_keywords: list[str]
+
+
+@dataclass
+class EvalRow:
+    label: str
+    retrieval_hit_rate: float
+    answer_keyword_hit_rate: float | None
+    avg_latency_ms: float

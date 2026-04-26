@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import re
 
+import dspy
+
+from .dspy_program import DSPyRAGProgram
 from .ingest import load_corpus
 from .internet import search_duckduckgo
-from .llm import LocalLLM
+from .llm import OpenAICompatConfig, build_dspy_lm
 from .models import AgentAnswer, SearchHit
-from .retrievers import HybridSearcher
+from .retrievers import HashEmbedder, HybridSearcher, SentenceTransformerEmbedder
 from .utils import expand_query, tokenize
 
 
@@ -15,17 +19,24 @@ INDEX_PATH = Path(__file__).resolve().parents[2] / "data" / "index.json"
 
 
 class ChatDKUAgent:
-    def __init__(self, index_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        index_path: Path | None = None,
+        embedding_model_name: str | None = None,
+    ) -> None:
         path = index_path or INDEX_PATH
         self.chunks = load_corpus(path)
-        self.hybrid = HybridSearcher(self.chunks)
-        self.llm = LocalLLM.from_env()
+        self.embedding_model_name = embedding_model_name or os.getenv("CHATDKU_EMBEDDING_MODEL", "hash")
+        self.embedder = self._build_embedder(self.embedding_model_name)
+        self.hybrid = HybridSearcher(self.chunks, embedder=self.embedder)
+        self.dspy_program = self._build_dspy_program()
 
     def answer(self, question: str, language: str = "en", allow_internet: bool = False) -> AgentAnswer:
         hits = self.hybrid.search(question, limit=5)
         tool_trace = ["keyword_search", "vector_search"]
         internet_results: list[dict[str, str]] = []
-        if allow_internet and not hits:
+        route = self._route_question(question, language, bool(hits), allow_internet)
+        if allow_internet and route in {"local_plus_internet", "internet_only"}:
             internet_results = search_duckduckgo(question)
             if internet_results:
                 tool_trace.append("internet_search")
@@ -41,6 +52,26 @@ class ChatDKUAgent:
         ]
         return AgentAnswer(language=language, answer=answer_text, sources=sources, tool_trace=tool_trace)
 
+    def _build_embedder(self, embedding_model_name: str):
+        if embedding_model_name == "hash":
+            return HashEmbedder()
+        return SentenceTransformerEmbedder(embedding_model_name)
+
+    def _build_dspy_program(self) -> DSPyRAGProgram | None:
+        config = OpenAICompatConfig.from_env()
+        lm = build_dspy_lm(config)
+        if lm is None:
+            return None
+        dspy.configure(lm=lm)
+        return DSPyRAGProgram(lm)
+
+    def _route_question(self, question: str, language: str, local_hits_found: bool, allow_internet: bool) -> str:
+        if self.dspy_program is None:
+            if allow_internet and not local_hits_found:
+                return "internet_only"
+            return "local_only"
+        return self.dspy_program.route(question, language, local_hits_found, allow_internet)
+
     def _format_answer(
         self,
         question: str,
@@ -52,23 +83,33 @@ class ChatDKUAgent:
             top = hits[:3]
             direct = self._generate_answer(question, top, language)
             snippets = "\n".join(
-                f"- {hit.chunk.text[:280].strip()} ({hit.chunk.doc_name}, page {hit.chunk.page or 'N/A'})"
-                for hit in top
+                f"- [{idx}] {hit.chunk.text[:280].strip()} ({hit.chunk.doc_name}, page {hit.chunk.page or 'N/A'})"
+                for idx, hit in enumerate(top, start=1)
             )
             if language == "zh":
+                closing = (
+                    "以上答案由本地 DSPy + vLLM 路径生成。"
+                    if self.dspy_program is not None
+                    else "如需更完整答复，可以继续把这些片段交给本地 LLM 做最终整合。"
+                )
                 return (
                     f"问题：{question}\n\n"
                     f"直接答案：{direct}\n\n"
                     "证据片段：\n"
                     f"{snippets}\n\n"
-                    "如需更完整答复，可以继续把这些片段交给本地 LLM 做最终整合。"
+                    f"{closing}"
                 )
+            closing = (
+                "This answer was generated through the local DSPy + vLLM path."
+                if self.dspy_program is not None
+                else "This can be passed to a local LLM for final answer synthesis."
+            )
             return (
                 f"Question: {question}\n\n"
                 f"Direct answer: {direct}\n\n"
                 "Evidence snippets:\n"
                 f"{snippets}\n\n"
-                "This can be passed to a local LLM for final answer synthesis."
+                f"{closing}"
             )
 
         if internet_results:
@@ -83,34 +124,18 @@ class ChatDKUAgent:
         return "I could not find enough relevant context. Try rephrasing the question or enabling internet search."
 
     def _generate_answer(self, question: str, hits: list[SearchHit], language: str) -> str:
-        llm_answer = self._llm_summary(question, hits, language)
-        if llm_answer:
-            return llm_answer
+        if self.dspy_program is not None:
+            evidence = "\n\n".join(
+                f"[{idx}] {hit.chunk.doc_name}, page {hit.chunk.page or 'N/A'}\n{hit.chunk.text}"
+                for idx, hit in enumerate(hits, start=1)
+            )
+            try:
+                dspy_answer = self.dspy_program.answer(question, language, evidence)
+                if dspy_answer:
+                    return dspy_answer
+            except Exception:
+                pass
         return self._extractive_summary(question, hits, language)
-
-    def _llm_summary(self, question: str, hits: list[SearchHit], language: str) -> str | None:
-        if not self.llm:
-            return None
-
-        evidence = "\n\n".join(
-            f"[{idx}] {hit.chunk.doc_name}, page {hit.chunk.page or 'N/A'}\n{hit.chunk.text}"
-            for idx, hit in enumerate(hits, start=1)
-        )
-
-        if language == "zh":
-            prompt = (
-                "你是一个大学教务问答助手。请只根据给定证据回答问题。"
-                "如果证据不足，就明确说明。回答保持简洁，并尽量在句末引用来源编号。\n\n"
-                f"问题：{question}\n\n证据：\n{evidence}"
-            )
-        else:
-            prompt = (
-                "You are a university advising assistant. Answer only from the provided evidence. "
-                "If the evidence is insufficient, say so clearly. Keep the answer concise and cite source "
-                "numbers when possible.\n\n"
-                f"Question: {question}\n\nEvidence:\n{evidence}"
-            )
-        return self.llm.complete(prompt)
 
     def _extractive_summary(self, question: str, hits: list[SearchHit], language: str) -> str:
         question_lower = question.lower()

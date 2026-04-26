@@ -1,18 +1,38 @@
 [
   {
     "question": "How many credits do I need to graduate?",
-    "expected_document": "Advising FAQ (12-19-24 Update).docx"
+    "language": "en",
+    "expected_document": "Advising FAQ (12-19-24 Update).docx",
+    "expected_answer_keywords": ["136", "34", "credits"]
   },
   {
     "question": "What is the Quantitative Reasoning requirement?",
-    "expected_document": "ug_bulletin_2025-2026.pdf"
+    "language": "en",
+    "expected_document": "ug_bulletin_2025-2026.pdf",
+    "expected_answer_keywords": ["quantitative", "reasoning"]
   },
   {
     "question": "Can I take classes while on leave of absence?",
-    "expected_document": "Advising FAQ (12-19-24 Update).docx"
+    "language": "en",
+    "expected_document": "Advising FAQ (12-19-24 Update).docx",
+    "expected_answer_keywords": ["8", "credits"]
   },
   {
     "question": "What are the distribution requirements?",
-    "expected_document": "ug_bulletin_2025-2026.pdf"
+    "language": "en",
+    "expected_document": "ug_bulletin_2025-2026.pdf",
+    "expected_answer_keywords": ["arts", "humanities", "social", "sciences"]
+  },
+  {
+    "question": "休学期间可以在别的学校上课吗？",
+    "language": "zh",
+    "expected_document": "Advising FAQ (12-19-24 Update).docx",
+    "expected_answer_keywords": ["8", "学分"]
+  },
+  {
+    "question": "毕业需要多少学分？",
+    "language": "zh",
+    "expected_document": "Advising FAQ (12-19-24 Update).docx",
+    "expected_answer_keywords": ["136", "34", "学分"]
   }
 ]

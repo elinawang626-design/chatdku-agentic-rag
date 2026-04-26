@@ -14,11 +14,16 @@ def main() -> None:
     ask_parser.add_argument("question", help="Question to answer")
     ask_parser.add_argument("--lang", choices=["en", "zh"], default="en")
     ask_parser.add_argument("--allow-internet", action="store_true")
+    ask_parser.add_argument(
+        "--embedding-model",
+        default=None,
+        help="Embedding model name. Use 'hash' for the lightweight fallback, or any sentence-transformers model id.",
+    )
 
     args = parser.parse_args()
 
     if args.command == "ask":
-        agent = ChatDKUAgent()
+        agent = ChatDKUAgent(embedding_model_name=args.embedding_model)
         result = agent.answer(args.question, language=args.lang, allow_internet=args.allow_internet)
         print(result.answer)
         print("\nSources:")

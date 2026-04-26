@@ -3,14 +3,22 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "chatdku-mini-rag"
+name = "chatdku-agentic-rag"
 version = "0.1.0"
-description = "Mini bilingual agentic RAG pipeline for the ChatDKU candidate task."
+description = "Bilingual agentic RAG pipeline for the ChatDKU candidate task."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+  "dspy>=3.2.0",
+  "openai>=2.32.0",
   "pypdf>=4.0.0",
   "python-docx>=1.1.0",
+  "sentence-transformers>=5.4.1",
+]
+
+[project.optional-dependencies]
+serving = [
+  "vllm>=0.19.1",
 ]
 
 [tool.setuptools]

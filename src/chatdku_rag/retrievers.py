@@ -2,9 +2,41 @@ from __future__ import annotations
 
 import math
 from collections import Counter, defaultdict
+from typing import Protocol
+
+import numpy as np
+from sentence_transformers import SentenceTransformer
 
 from .models import Chunk, SearchHit
 from .utils import dot, expand_query, hashed_embedding, tokenize
+
+
+class Embedder(Protocol):
+    name: str
+
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        ...
+
+
+class HashEmbedder:
+    def __init__(self, dims: int = 512) -> None:
+        self.dims = dims
+        self.name = f"hash-{dims}"
+
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        return [hashed_embedding(text, dims=self.dims) for text in texts]
+
+
+class SentenceTransformerEmbedder:
+    def __init__(self, model_name: str) -> None:
+        self.name = model_name
+        self.model = SentenceTransformer(model_name)
+
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        vectors = self.model.encode(texts, normalize_embeddings=True, show_progress_bar=False)
+        if isinstance(vectors, np.ndarray):
+            return vectors.tolist()
+        return [list(vector) for vector in vectors]
 
 
 class KeywordSearcher:
@@ -43,13 +75,13 @@ class KeywordSearcher:
 
 
 class VectorSearcher:
-    def __init__(self, chunks: list[Chunk], dims: int = 512) -> None:
+    def __init__(self, chunks: list[Chunk], embedder: Embedder | None = None, dims: int = 512) -> None:
         self.chunks = chunks
-        self.dims = dims
-        self.embeddings = [hashed_embedding(chunk.text, dims=dims) for chunk in chunks]
+        self.embedder = embedder or HashEmbedder(dims=dims)
+        self.embeddings = self.embedder.embed_texts([chunk.text for chunk in chunks])
 
     def search(self, query: str, limit: int = 5) -> list[SearchHit]:
-        query_vec = hashed_embedding(expand_query(query), dims=self.dims)
+        query_vec = self.embedder.embed_texts([expand_query(query)])[0]
         hits: list[SearchHit] = []
         for chunk, vector in zip(self.chunks, self.embeddings):
             score = dot(query_vec, vector)
@@ -59,9 +91,9 @@ class VectorSearcher:
 
 
 class HybridSearcher:
-    def __init__(self, chunks: list[Chunk]) -> None:
+    def __init__(self, chunks: list[Chunk], embedder: Embedder | None = None) -> None:
         self.keyword = KeywordSearcher(chunks)
-        self.vector = VectorSearcher(chunks)
+        self.vector = VectorSearcher(chunks, embedder=embedder)
 
     def search(self, query: str, limit: int = 6) -> list[SearchHit]:
         merged: dict[str, SearchHit] = {}

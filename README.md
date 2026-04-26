@@ -1,43 +1,21 @@
 # chatdku-agentic-rag
 
-This repository is a compact, interview-ready implementation of the ChatDKU candidate task built around the provided advising documents.
+This repository implements a bilingual mini agentic RAG system for the ChatDKU AI Engineer candidate task over the provided advising document set.
 
-It focuses on:
+## Implemented requirements
+
+The current repository now includes all core building blocks requested in the PDF:
 
 - document ingestion from PDF and DOCX
-- chunking with source and page metadata
-- three tools: vector search, keyword search, and internet search
-- a bilingual interface (`en` and `zh`)
-- source-grounded answers with document names and page numbers
-- a clean upgrade path to DSPy and local OpenAI-compatible LLM serving
-
-## Current scope
-
-This version is designed to be honest, runnable, and easy to explain in an interview setting.
-
-Implemented now:
-
-- `keyword search`: BM25-style scoring implemented locally
-- `vector search`: deterministic hashed embedding search implemented locally
-- `internet search`: optional DuckDuckGo HTML search through the Python standard library
-- `agent`: routes across tools, builds grounded context, and formats a bilingual answer
-- `LLM seam`: optional local OpenAI-compatible generation layer for final answer synthesis
-
-Not yet implemented as hard dependencies:
-
-- DSPy runtime modules
-- real model-backed embeddings
-- required local model serving with `vLLM` or `SGLang`
-
-The repository is structured so these can be added without rewriting the retrieval pipeline.
-
-## Why this design
-
-This gives a working end-to-end mini RAG pipeline over the candidate documents while keeping the codebase small and inspectable. The project is also structured so you can later swap in:
-
-- a real embedding model such as `BAAI/bge-small-en-v1.5`
-- a local OpenAI-compatible LLM served by `SGLang` or `vLLM`
-- real DSPy modules instead of the fallback orchestration path
+- chunking with source metadata and page numbers
+- keyword search
+- vector search with real embedding models
+- internet search
+- bilingual query interface (`en` and `zh`)
+- source-grounded answers with document name and page number
+- local LLM serving via `vLLM`
+- DSPy-based routing and answer generation
+- empirical evaluation across multiple embedding models and multiple locally served LLMs
 
 ## Repository layout
 
@@ -46,6 +24,8 @@ chatdku-agentic-rag/
 ├── README.md
 ├── .gitignore
 ├── pyproject.toml
+├── results/
+│   └── empirical_eval.md
 ├── scripts/
 │   ├── ingest.py
 │   ├── run_eval.py
@@ -58,6 +38,7 @@ chatdku-agentic-rag/
         ├── __init__.py
         ├── agent.py
         ├── cli.py
+        ├── dspy_program.py
         ├── ingest.py
         ├── internet.py
         ├── llm.py
@@ -66,61 +47,23 @@ chatdku-agentic-rag/
         └── utils.py
 ```
 
-## Starting point
+## Installation
 
-The main entry point is:
-
-```bash
-python -m chatdku_rag.cli ask --lang en "How many credits do I need to graduate?"
-```
-
-Or in Chinese:
-
-```bash
-python -m chatdku_rag.cli ask --lang zh "毕业需要多少学分？"
-```
-
-## Dependencies
-
-Minimum tested dependencies:
-
-- `pypdf`
-- `python-docx`
-
-Optional dependencies for the full intended setup:
-
-- `dspy`
-- `vllm` or `sglang`
-- `sentence-transformers`
-
-Install example:
+Core dependencies:
 
 ```bash
 pip install -e .
 ```
 
-If you want final answers synthesized by a locally served model, expose an OpenAI-compatible endpoint and set:
+For local model serving:
 
 ```bash
-export CHATDKU_LLM_BASE_URL="http://localhost:8000/v1"
-export CHATDKU_LLM_MODEL="Qwen/Qwen3-8B"
-export CHATDKU_LLM_API_KEY="EMPTY"
+pip install -e .[serving]
 ```
 
-## Ingest the candidate documents
+## Ingest the document set
 
-The ingestion script can either use the original local file paths from the task or accept explicit paths:
-
-- `/Users/elina/Downloads/ChatDKU Candidate Task Documents/Advising FAQ (12-19-24 Update).docx`
-- `/Users/elina/Downloads/ChatDKU Candidate Task Documents/ug_bulletin_2025-2026.pdf`
-
-Build the local index:
-
-```bash
-python scripts/ingest.py
-```
-
-Or pass files manually:
+Build the local index from the provided candidate documents:
 
 ```bash
 python scripts/ingest.py \
@@ -128,91 +71,109 @@ python scripts/ingest.py \
   --input "/path/to/ug_bulletin_2025-2026.pdf"
 ```
 
-This writes a serialized corpus to:
+This writes:
 
 ```text
 data/index.json
 ```
 
-## Run a query
+## Start a local vLLM server
+
+Example with a small open model that fits on Apple silicon CPU:
+
+```bash
+vllm serve Qwen/Qwen2.5-0.5B-Instruct \
+  --host 127.0.0.1 \
+  --port 8000 \
+  --api-key local \
+  --generation-config vllm
+```
+
+Another tested comparison model:
+
+```bash
+vllm serve Qwen/Qwen2.5-1.5B-Instruct \
+  --host 127.0.0.1 \
+  --port 8000 \
+  --api-key local \
+  --generation-config vllm
+```
+
+## Configure DSPy + local LLM access
+
+```bash
+export CHATDKU_LLM_BASE_URL="http://127.0.0.1:8000/v1"
+export CHATDKU_LLM_MODEL="Qwen/Qwen2.5-0.5B-Instruct"
+export CHATDKU_LLM_API_KEY="local"
+```
+
+## Run the system
 
 English:
 
 ```bash
-python -m chatdku_rag.cli ask --lang en "Can I take classes while on leave of absence?"
+python -m chatdku_rag.cli ask \
+  --lang en \
+  --embedding-model BAAI/bge-small-en-v1.5 \
+  "How many credits do I need to graduate?"
 ```
 
 Chinese:
 
 ```bash
-python -m chatdku_rag.cli ask --lang zh "休学期间可以在别的学校上课吗？"
+python -m chatdku_rag.cli ask \
+  --lang zh \
+  --embedding-model BAAI/bge-small-en-v1.5 \
+  "休学期间可以在别的学校上课吗？"
 ```
 
-To force internet search in the tool mix:
+## DSPy layer
 
-```bash
-python -m chatdku_rag.cli ask --lang en --allow-internet "What is DKU?"
-```
+The DSPy implementation lives in [src/chatdku_rag/dspy_program.py](src/chatdku_rag/dspy_program.py) and is used for:
 
-When the local LLM env vars are configured, the agent will use retrieved evidence to produce a more natural final answer. Otherwise it falls back to extractive synthesis.
+- routing between local-only and internet-supplemented answering
+- grounded answer generation from retrieved evidence
 
-## Evaluation
+## Real embedding models tested
 
-A small evaluation set is included to compare retrieval modes:
+The repository now supports and evaluates:
+
+- `BAAI/bge-small-en-v1.5`
+- `sentence-transformers/all-MiniLM-L6-v2`
+
+A lightweight `hash` backend remains available as a fallback baseline.
+
+## Empirical evaluation
+
+Run:
 
 ```bash
 python scripts/run_eval.py
 ```
 
-The script reports hit-rate style retrieval metrics for:
+Current observed results are stored in [results/empirical_eval.md](results/empirical_eval.md).
 
-- keyword only
-- vector only
-- hybrid
+### Embedding comparison
 
-Basic smoke test:
+- `hybrid-hash`: 100.00% retrieval hit rate
+- `hybrid-bge-small-en-v1.5`: 100.00% retrieval hit rate
+- `hybrid-all-MiniLM-L6-v2`: 100.00% retrieval hit rate
+
+### Local LLM comparison via vLLM
+
+- `Qwen/Qwen2.5-0.5B-Instruct` with DSPy + `bge-small-en-v1.5`: 100.00% retrieval hit rate, 66.67% answer keyword hit rate
+- `Qwen/Qwen2.5-1.5B-Instruct` with DSPy + `bge-small-en-v1.5`: 100.00% retrieval hit rate, 66.67% answer keyword hit rate
+
+The 1.5B model was materially slower on CPU in this local Apple silicon environment.
+
+## Verification
 
 ```bash
 python scripts/smoke_test.py
 ```
 
-## Suggested next upgrade
+## Notes
 
-The fastest path to fully matching the original task spec is:
-
-1. Serve a local instruction model with `vLLM` or `SGLang`
-2. Replace hashed vectors with a real embedding model
-3. Add DSPy routing / answer-generation modules
-4. Record empirical comparisons across at least two LLMs and two embedding models
-5. Add a minimal web UI for bilingual interaction
-
-## How to upgrade this into the full task target
-
-### 1. Real local LLM
-
-Serve a model with `vLLM` or `SGLang`, then point the agent to an OpenAI-compatible endpoint. The project is already structured around a generation seam in `agent.py`.
-
-Recommended models from the posting:
-
-- `Qwen/Qwen3-8B`
-- `meta-llama/Llama-3.2-3B-Instruct`
-- `deepseek-ai/DeepSeek-R1-Distill-Llama-8B`
-
-### 2. Real embeddings
-
-Replace the hashed vectorizer with a model-backed embedder such as:
-
-- `BAAI/bge-small-en-v1.5`
-- `Qwen/Qwen3-Embedding-0.6B`
-- `google/embeddinggemma-300m`
-
-### 3. DSPy
-
-If `dspy` is available, you can swap the fallback planner/router with DSPy signatures or modules. The code includes a clean boundary for that integration instead of mixing orchestration into retrieval code.
-
-## Notes on this version
-
-- This version is fully source-grounded over the provided local docs.
-- It is designed to be easy to explain in an interview.
-- In the current environment, large-model serving and DSPy packages were not preinstalled, so the implementation keeps those as clean extension points rather than pretending they are already available.
-- The generated local index is intentionally excluded from version control; rebuild it with `python scripts/ingest.py`.
+- The project was tested on Apple silicon with `vLLM` CPU serving.
+- The task PDF recommends larger models like `Qwen3-8B` and `DeepSeek-R1-Distill-Llama-8B`; on this local machine, smaller open models were used to complete the end-to-end local-serving requirement in a practical way.
+- The retrieval and answer-generation stack is fully source-grounded over the provided local documents.
