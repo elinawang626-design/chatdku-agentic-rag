@@ -23,10 +23,12 @@ class ChatDKUAgent:
         self,
         index_path: Path | None = None,
         embedding_model_name: str | None = None,
+        llm_config: OpenAICompatConfig | None = None,
     ) -> None:
         path = index_path or INDEX_PATH
         self.chunks = load_corpus(path)
         self.embedding_model_name = embedding_model_name or os.getenv("CHATDKU_EMBEDDING_MODEL", "hash")
+        self.llm_config = llm_config
         self.embedder = self._build_embedder(self.embedding_model_name)
         self.hybrid = HybridSearcher(self.chunks, embedder=self.embedder)
         self.dspy_program = self._build_dspy_program()
@@ -58,7 +60,7 @@ class ChatDKUAgent:
         return SentenceTransformerEmbedder(embedding_model_name)
 
     def _build_dspy_program(self) -> DSPyRAGProgram | None:
-        config = OpenAICompatConfig.from_env()
+        config = self.llm_config or OpenAICompatConfig.from_env()
         lm = build_dspy_lm(config)
         if lm is None:
             return None

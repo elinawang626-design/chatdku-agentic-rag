@@ -1,0 +1,14 @@
+[
+  {
+    "label": "qwen2.5-0.5b-vllm",
+    "model": "Qwen/Qwen2.5-0.5B-Instruct",
+    "api_base": "http://127.0.0.1:8000/v1",
+    "api_key": "local"
+  },
+  {
+    "label": "qwen2.5-1.5b-vllm",
+    "model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "api_base": "http://127.0.0.1:8001/v1",
+    "api_key": "local"
+  }
+]

@@ -4,4 +4,3 @@ __pycache__/
 .venv/
 .dspy_cache/
 data/index.json
-results/

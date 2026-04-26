@@ -10,15 +10,23 @@ def main() -> None:
         "--input",
         action="append",
         dest="inputs",
-        default=None,
+        default=[],
         help="Path to a PDF or DOCX file. May be passed multiple times.",
+    )
+    parser.add_argument(
+        "--output",
+        default=None,
+        help="Optional output index path. Defaults to data/index.json.",
     )
     args = parser.parse_args()
 
+    if not args.inputs:
+        raise SystemExit("Pass at least one `--input` path to build the index.")
+
     root = Path(__file__).resolve().parents[1]
-    input_paths = [Path(value).expanduser() for value in args.inputs] if args.inputs else None
+    input_paths = [Path(value).expanduser() for value in args.inputs]
+    output_path = Path(args.output).expanduser() if args.output else root / "data" / "index.json"
     chunks = build_corpus(input_paths)
-    output_path = root / "data" / "index.json"
     save_corpus(chunks, output_path)
     print(f"Indexed {len(chunks)} chunks into {output_path}")
 

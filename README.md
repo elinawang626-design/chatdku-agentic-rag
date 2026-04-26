@@ -25,13 +25,15 @@ chatdku-agentic-rag/
 ├── .gitignore
 ├── pyproject.toml
 ├── results/
-│   └── empirical_eval.md
+│   ├── empirical_eval.md
+│   └── local_llm_eval_observed.md
 ├── scripts/
 │   ├── ingest.py
 │   ├── run_eval.py
 │   └── smoke_test.py
 ├── data/
 │   └── eval/
+│       ├── llm_eval_configs.example.json
 │       └── sample_eval.json
 └── src/
     └── chatdku_rag/
@@ -76,6 +78,8 @@ This writes:
 ```text
 data/index.json
 ```
+
+The ingestion step is intentionally explicit. The repository does not hardcode any machine-specific absolute paths.
 
 ## Start a local vLLM server
 
@@ -148,10 +152,12 @@ A lightweight `hash` backend remains available as a fallback baseline.
 Run:
 
 ```bash
-python scripts/run_eval.py
+python scripts/run_eval.py \
+  --input "/path/to/Advising FAQ (12-19-24 Update).docx" \
+  --input "/path/to/ug_bulletin_2025-2026.pdf"
 ```
 
-Current observed results are stored in [results/empirical_eval.md](results/empirical_eval.md).
+The latest regenerated retrieval/embedding results are stored in [results/empirical_eval.md](results/empirical_eval.md).
 
 ### Embedding comparison
 
@@ -161,19 +167,32 @@ Current observed results are stored in [results/empirical_eval.md](results/empir
 
 ### Local LLM comparison via vLLM
 
+Previously observed local-vLLM results are stored in [results/local_llm_eval_observed.md](results/local_llm_eval_observed.md):
+
 - `Qwen/Qwen2.5-0.5B-Instruct` with DSPy + `bge-small-en-v1.5`: 100.00% retrieval hit rate, 66.67% answer keyword hit rate
 - `Qwen/Qwen2.5-1.5B-Instruct` with DSPy + `bge-small-en-v1.5`: 100.00% retrieval hit rate, 66.67% answer keyword hit rate
 
 The 1.5B model was materially slower on CPU in this local Apple silicon environment.
 
+To reproduce multiple local-LLM rows in one run, start separate OpenAI-compatible servers on different ports and pass a config file:
+
+```bash
+python scripts/run_eval.py \
+  --input "/path/to/Advising FAQ (12-19-24 Update).docx" \
+  --input "/path/to/ug_bulletin_2025-2026.pdf" \
+  --llm-configs data/eval/llm_eval_configs.example.json
+```
+
 ## Verification
 
 ```bash
-python scripts/smoke_test.py
+python scripts/smoke_test.py \
+  --input "/path/to/Advising FAQ (12-19-24 Update).docx" \
+  --input "/path/to/ug_bulletin_2025-2026.pdf"
 ```
 
 ## Notes
 
 - The project was tested on Apple silicon with `vLLM` CPU serving.
 - The task PDF recommends larger models like `Qwen3-8B` and `DeepSeek-R1-Distill-Llama-8B`; on this local machine, smaller open models were used to complete the end-to-end local-serving requirement in a practical way.
-- The retrieval and answer-generation stack is fully source-grounded over the provided local documents.
+- The retrieval and answer-generation stack is source-grounded over the provided local documents, including FAQ page numbers inferred from the document's table of contents.

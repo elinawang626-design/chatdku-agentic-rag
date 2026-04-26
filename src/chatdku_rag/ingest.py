@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import re
+import subprocess
 from pathlib import Path
 
 from docx import Document
@@ -10,10 +12,7 @@ from .models import Chunk
 from .utils import normalize_whitespace
 
 
-DEFAULT_INPUTS = [
-    Path("/Users/elina/Downloads/ChatDKU Candidate Task Documents/Advising FAQ (12-19-24 Update).docx"),
-    Path("/Users/elina/Downloads/ChatDKU Candidate Task Documents/ug_bulletin_2025-2026.pdf"),
-]
+TOC_LINE_RE = re.compile(r"^(?P<title>.+?)\s+(\.{2,}\s*)?(?P<page>\d{1,3})$")
 
 
 def _chunk_text(doc_name: str, text: str, page: int | None, size: int = 1200, overlap: int = 150) -> list[Chunk]:
@@ -50,23 +49,117 @@ def extract_pdf(path: Path) -> list[Chunk]:
     return chunks
 
 
+def _normalize_heading(text: str) -> str:
+    lowered = normalize_whitespace(text).lower()
+    return re.sub(r"\s+", " ", lowered).strip(" :.-")
+
+
+def _parse_toc_page_map(paragraphs: list[str]) -> tuple[dict[str, int], int]:
+    page_map: dict[str, int] = {}
+    body_start = 0
+    found_entries = 0
+
+    for index, raw in enumerate(paragraphs):
+        text = normalize_whitespace(raw)
+        if not text:
+            continue
+        match = TOC_LINE_RE.match(text)
+        if match:
+            title = _normalize_heading(match.group("title"))
+            page = int(match.group("page"))
+            if title:
+                page_map[title] = page
+                found_entries += 1
+            continue
+        if found_entries >= 10:
+            body_start = index
+            break
+    return page_map, body_start
+
+
+def _parse_toc_page_map_from_textutil(path: Path) -> dict[str, int]:
+    try:
+        completed = subprocess.run(
+            ["textutil", "-convert", "txt", "-stdout", str(path)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return {}
+
+    page_map: dict[str, int] = {}
+    found_entries = 0
+    for raw in completed.stdout.splitlines():
+        text = normalize_whitespace(raw)
+        if not text:
+            continue
+        match = TOC_LINE_RE.match(text)
+        if not match:
+            if found_entries >= 10:
+                break
+            continue
+        title = _normalize_heading(match.group("title"))
+        page = int(match.group("page"))
+        if title:
+            page_map[title] = page
+            found_entries += 1
+    return page_map
+
+
 def extract_docx(path: Path) -> list[Chunk]:
     doc = Document(str(path))
-    text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
-    return _chunk_text(path.name, text, None)
+    paragraphs = [paragraph.text for paragraph in doc.paragraphs]
+    page_map, body_start = _parse_toc_page_map(paragraphs)
+    if not page_map:
+        page_map = _parse_toc_page_map_from_textutil(path)
+        body_start = 0
+
+    if not page_map:
+        text = "\n".join(paragraphs)
+        return _chunk_text(path.name, text, None)
+
+    chunks: list[Chunk] = []
+    current_page: int | None = min(page_map.values())
+    buffer: list[str] = []
+
+    def flush_buffer() -> None:
+        nonlocal buffer
+        if not buffer:
+            return
+        chunks.extend(_chunk_text(path.name, "\n".join(buffer), current_page))
+        buffer = []
+
+    for raw in paragraphs[body_start:]:
+        text = normalize_whitespace(raw)
+        if not text:
+            continue
+        heading_key = _normalize_heading(text)
+        mapped_page = page_map.get(heading_key)
+        if mapped_page is not None and mapped_page != current_page:
+            flush_buffer()
+            current_page = mapped_page
+        buffer.append(text)
+
+    flush_buffer()
+    return chunks
 
 
 def build_corpus(paths: list[Path] | None = None) -> list[Chunk]:
-    inputs = paths or DEFAULT_INPUTS
+    if not paths:
+        raise ValueError("No input files provided. Pass one or more PDF/DOCX paths.")
+
     corpus: list[Chunk] = []
-    for path in inputs:
+    for path in paths:
         if not path.exists():
-            continue
+            raise FileNotFoundError(f"Input document not found: {path}")
         suffix = path.suffix.lower()
         if suffix == ".pdf":
             corpus.extend(extract_pdf(path))
         elif suffix == ".docx":
             corpus.extend(extract_docx(path))
+        else:
+            raise ValueError(f"Unsupported input type: {path}")
     return corpus
 
 

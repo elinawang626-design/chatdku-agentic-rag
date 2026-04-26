@@ -12,6 +12,7 @@ class OpenAICompatConfig:
     model: str
     api_base: str
     api_key: str
+    label: str | None = None
 
     @classmethod
     def from_env(cls) -> "OpenAICompatConfig | None":
@@ -21,6 +22,18 @@ class OpenAICompatConfig:
         if not model or not api_base:
             return None
         return cls(model=model, api_base=api_base, api_key=api_key)
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, str]) -> "OpenAICompatConfig":
+        return cls(
+            model=payload["model"],
+            api_base=payload["api_base"],
+            api_key=payload.get("api_key", "local"),
+            label=payload.get("label"),
+        )
+
+    def display_name(self) -> str:
+        return self.label or self.model
 
 
 class OpenAICompatClient:
