@@ -1,11 +1,11 @@
 # Observed Local LLM Evaluation
 
-These rows were collected from prior local `vLLM` runs on this machine using the same document set and the earlier orchestration pipeline. They are kept separate from `empirical_eval.md` because the latter is regenerated directly by `scripts/run_eval.py`.
+These rows were collected from prior local `vLLM` runs on this machine using the same document set and DSPy pipeline. They are kept separate from `empirical_eval.md` because the latter is regenerated directly by `scripts/run_eval.py`.
 
 | Label | Retrieval Hit Rate | Answer Keyword Hit Rate | Avg Latency (ms) |
 |---|---:|---:|---:|
-| langchain+Qwen/Qwen2.5-0.5B-Instruct+bge-small-en-v1.5 | 100.00% | 66.67% | 35004.1 |
-| langchain+Qwen/Qwen2.5-1.5B-Instruct+bge-small-en-v1.5 | 100.00% | 66.67% | 74250.0 |
+| dspy+Qwen/Qwen2.5-0.5B-Instruct+bge-small-en-v1.5 | 100.00% | 66.67% | 35004.1 |
+| dspy+Qwen/Qwen2.5-1.5B-Instruct+bge-small-en-v1.5 | 100.00% | 66.67% | 74250.0 |
 
 To reproduce these rows, start two OpenAI-compatible local servers and run:
 

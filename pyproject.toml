@@ -9,8 +9,7 @@ description = "Bilingual agentic RAG pipeline for the ChatDKU candidate task."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-  "langchain>=1.2.0",
-  "langchain-openai>=1.2.0",
+  "dspy>=3.2.0",
   "openai>=2.32.0",
   "pypdf>=4.0.0",
   "python-docx>=1.1.0",

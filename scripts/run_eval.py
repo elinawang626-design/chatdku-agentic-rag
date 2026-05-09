@@ -165,7 +165,7 @@ def main() -> None:
         started = time.perf_counter()
         retrieval, answer = evaluate_agent(agent, examples)
         latency_ms = ((time.perf_counter() - started) / len(examples)) * 1000
-        label = f"langchain+{llm_config.display_name()}+{embedding_model}"
+        label = f"dspy+{llm_config.display_name()}+{embedding_model}"
         print(f"{label}: retrieval={retrieval:.2%}, answer={answer:.2%}, avg_latency_ms={latency_ms:.1f}")
         markdown_rows.append(
             {

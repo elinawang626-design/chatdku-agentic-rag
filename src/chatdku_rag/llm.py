@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-from langchain_openai import ChatOpenAI
+import dspy
 from openai import OpenAI
 
 
@@ -58,12 +58,14 @@ class OpenAICompatClient:
             return True
         except Exception:
             return False
-def build_langchain_chat_model(config: OpenAICompatConfig | None, temperature: float = 0.2) -> ChatOpenAI | None:
+
+
+def build_dspy_lm(config: OpenAICompatConfig | None) -> dspy.LM | None:
     if config is None:
         return None
-    return ChatOpenAI(
-        model=config.model,
-        base_url=config.api_base,
+    return dspy.LM(
+        f"openai/{config.model}",
+        api_base=config.api_base,
         api_key=config.api_key,
-        temperature=temperature,
+        model_type="chat",
     )

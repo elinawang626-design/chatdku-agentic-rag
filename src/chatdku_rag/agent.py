@@ -4,12 +4,12 @@ import os
 from pathlib import Path
 import re
 
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
+import dspy
 
+from .dspy_program import DSPyRAGProgram
 from .ingest import load_corpus
 from .internet import search_duckduckgo
-from .llm import OpenAICompatConfig, build_langchain_chat_model
+from .llm import OpenAICompatConfig, build_dspy_lm
 from .models import AgentAnswer, SearchHit
 from .retrievers import HashEmbedder, HybridSearcher, SentenceTransformerEmbedder
 from .utils import expand_query, tokenize
@@ -28,15 +28,14 @@ class ChatDKUAgent:
         path = index_path or INDEX_PATH
         self.chunks = load_corpus(path)
         self.embedding_model_name = embedding_model_name or os.getenv("CHATDKU_EMBEDDING_MODEL", "hash")
-        self.llm_config = llm_config or OpenAICompatConfig.from_env()
+        self.llm_config = llm_config
         self.embedder = self._build_embedder(self.embedding_model_name)
         self.hybrid = HybridSearcher(self.chunks, embedder=self.embedder)
-        self.router_chain = self._build_router_chain()
-        self.answer_chain = self._build_answer_chain()
+        self.dspy_program = self._build_dspy_program()
 
     def answer(self, question: str, language: str = "en", allow_internet: bool = False) -> AgentAnswer:
         hits = self.hybrid.search(question, limit=5)
-        tool_trace = ["langchain_router", "keyword_search", "vector_search"]
+        tool_trace = ["keyword_search", "vector_search"]
         internet_results: list[dict[str, str]] = []
         route = self._route_question(question, language, bool(hits), allow_internet)
         if allow_internet and route in {"local_plus_internet", "internet_only"}:
@@ -71,75 +70,20 @@ class ChatDKUAgent:
             return HashEmbedder()
         return SentenceTransformerEmbedder(embedding_model_name)
 
-    def _build_router_chain(self):
-        llm = build_langchain_chat_model(self.llm_config, temperature=0.0)
-        if llm is None:
+    def _build_dspy_program(self) -> DSPyRAGProgram | None:
+        config = self.llm_config or OpenAICompatConfig.from_env()
+        lm = build_dspy_lm(config)
+        if lm is None:
             return None
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                (
-                    "system",
-                    "You are a routing layer for a university advising RAG assistant. "
-                    "Return only one label: local_only, local_plus_internet, or internet_only.",
-                ),
-                (
-                    "human",
-                    "Question: {question}\n"
-                    "Language: {language}\n"
-                    "Local hits found: {local_hits_found}\n"
-                    "Internet allowed: {allow_internet}\n"
-                    "Choose the best route and return only the label.",
-                ),
-            ]
-        )
-        return prompt | llm | StrOutputParser()
-
-    def _build_answer_chain(self):
-        llm = build_langchain_chat_model(self.llm_config, temperature=0.2)
-        if llm is None:
-            return None
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                (
-                    "system",
-                    "You are a careful bilingual university advising assistant. "
-                    "Answer only from the supplied evidence. Keep the answer concise and grounded. "
-                    "Use citation ids like [1] or [2] when useful. Match the user's language.",
-                ),
-                (
-                    "human",
-                    "Question: {question}\n"
-                    "Language: {language}\n\n"
-                    "Evidence:\n{evidence}\n\n"
-                    "Write a direct answer grounded only in the evidence.",
-                ),
-            ]
-        )
-        return prompt | llm | StrOutputParser()
+        dspy.configure(lm=lm)
+        return DSPyRAGProgram(lm)
 
     def _route_question(self, question: str, language: str, local_hits_found: bool, allow_internet: bool) -> str:
-        if self.router_chain is None:
+        if self.dspy_program is None:
             if allow_internet and not local_hits_found:
                 return "internet_only"
             return "local_only"
-
-        try:
-            route = self.router_chain.invoke(
-                {
-                    "question": question,
-                    "language": language,
-                    "local_hits_found": "yes" if local_hits_found else "no",
-                    "allow_internet": "yes" if allow_internet else "no",
-                }
-            ).strip().lower()
-        except Exception:
-            route = ""
-
-        if route in {"local_only", "local_plus_internet", "internet_only"}:
-            return route
-        if allow_internet and not local_hits_found:
-            return "internet_only"
-        return "local_only"
+        return self.dspy_program.route(question, language, local_hits_found, allow_internet)
 
     def _format_answer(
         self,
@@ -157,18 +101,22 @@ class ChatDKUAgent:
             )
             internet_note = ""
             if internet_results:
-                web_lines = "\n".join(
-                    f"- [W{idx}] {item['title']} (web result, {item['url']})"
-                    for idx, item in enumerate(internet_results, start=1)
-                )
                 if language == "zh":
+                    web_lines = "\n".join(
+                        f"- [W{idx}] {item['title']} (web result, {item['url']})"
+                        for idx, item in enumerate(internet_results, start=1)
+                    )
                     internet_note = f"\n\n补充网络结果：\n{web_lines}"
                 else:
+                    web_lines = "\n".join(
+                        f"- [W{idx}] {item['title']} (web result, {item['url']})"
+                        for idx, item in enumerate(internet_results, start=1)
+                    )
                     internet_note = f"\n\nSupplemental internet results:\n{web_lines}"
             if language == "zh":
                 closing = (
-                    "以上答案由本地 LangChain + vLLM 路径生成。"
-                    if self.answer_chain is not None
+                    "以上答案由本地 DSPy + vLLM 路径生成。"
+                    if self.dspy_program is not None
                     else "如需更完整答复，可以继续把这些片段交给本地 LLM 做最终整合。"
                 )
                 return (
@@ -180,8 +128,8 @@ class ChatDKUAgent:
                     f"{closing}"
                 )
             closing = (
-                "This answer was generated through the local LangChain + vLLM path."
-                if self.answer_chain is not None
+                "This answer was generated through the local DSPy + vLLM path."
+                if self.dspy_program is not None
                 else "This can be passed to a local LLM for final answer synthesis."
             )
             return (
@@ -194,15 +142,19 @@ class ChatDKUAgent:
             )
 
         if internet_results:
-            rows = "\n".join(
-                f"- [W{idx}] {item['title']} (web result, {item['url']})"
-                for idx, item in enumerate(internet_results, start=1)
-            )
             if language == "zh":
+                rows = "\n".join(
+                    f"- [W{idx}] {item['title']} (web result, {item['url']})"
+                    for idx, item in enumerate(internet_results, start=1)
+                )
                 return (
                     "本地文档未命中，因此无法提供校内文档页码引用。以下是补充网络结果：\n"
                     f"{rows}"
                 )
+            rows = "\n".join(
+                f"- [W{idx}] {item['title']} (web result, {item['url']})"
+                for idx, item in enumerate(internet_results, start=1)
+            )
             return (
                 "No local document hits were found, so no document page citations are available. "
                 "Supplemental internet results:\n"
@@ -214,21 +166,15 @@ class ChatDKUAgent:
         return "I could not find enough relevant context. Try rephrasing the question or enabling internet search."
 
     def _generate_answer(self, question: str, hits: list[SearchHit], language: str) -> str:
-        if self.answer_chain is not None:
+        if self.dspy_program is not None:
             evidence = "\n\n".join(
                 f"[{idx}] {hit.chunk.doc_name}, page {hit.chunk.page or 'N/A'}\n{hit.chunk.text}"
                 for idx, hit in enumerate(hits, start=1)
             )
             try:
-                answer = self.answer_chain.invoke(
-                    {
-                        "question": question,
-                        "language": language,
-                        "evidence": evidence,
-                    }
-                ).strip()
-                if answer:
-                    return answer
+                dspy_answer = self.dspy_program.answer(question, language, evidence)
+                if dspy_answer:
+                    return dspy_answer
             except Exception:
                 pass
         return self._extractive_summary(question, hits, language)
@@ -248,7 +194,7 @@ class ChatDKUAgent:
                     "Graduation normally requires 136 DKU credits, including 34 DKU credits earned in courses "
                     "taught or co-taught by Duke faculty; some Chinese students have additional requirements."
                 )
-            if ("leave" in question_lower or "loa" in question_lower or "休学" in lower) and (
+            if ("leave" in question_lower or "loa" in question_lower or "休学" in question_lower) and (
                 "can i take classes at different universities while i’m on leave of absence" in lower
                 or "can i take classes at different universities while i'm on leave of absence" in lower
             ):
