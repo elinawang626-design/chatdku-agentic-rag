@@ -98,7 +98,7 @@ Another tested comparison model:
 ```bash
 vllm serve Qwen/Qwen2.5-1.5B-Instruct \
   --host 127.0.0.1 \
-  --port 8000 \
+  --port 8001 \
   --api-key local \
   --generation-config vllm
 ```
